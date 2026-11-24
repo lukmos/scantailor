@@ -16,6 +16,7 @@ SET(
 	OptionsWidget.cpp OptionsWidget.h
 	Settings.cpp Settings.h
 	Task.cpp Task.h
+	TextRegionMask.cpp TextRegionMask.h TextRegionWeights.inc
 	CacheDrivenTask.cpp CacheDrivenTask.h
 	Dependencies.cpp Dependencies.h
 	Params.cpp Params.h

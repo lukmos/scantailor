@@ -17,6 +17,7 @@
 */
 
 #include "Task.h"
+#include "TextRegionMask.h"
 #include "Filter.h"
 #include "OptionsWidget.h"
 #include "Settings.h"
@@ -33,7 +34,6 @@
 #include "ImageTransformation.h"
 #include "imageproc/BinaryImage.h"
 #include "imageproc/BWColor.h"
-#include "imageproc/OrthogonalRotation.h"
 #include "imageproc/SkewFinder.h"
 #include "imageproc/RasterOp.h"
 #include "imageproc/ReduceThreshold.h"
@@ -145,15 +145,10 @@ Task::process(TaskStatus const& status, FilterData const& data)
 		status.throwIfCancelled();
 		
 		if (bounded_image_area.isValid()) {
-			BinaryImage rotated_image(
-				orthogonalRotation(
-					BinaryImage(
-						data.grayImage(), bounded_image_area,
-						data.bwThreshold()
-					),
-					data.xform().preRotation().toDegrees()
-				)
-			);
+			int const rotation = data.xform().preRotation().toDegrees();
+			QImage const bounded_gray(data.grayImage().toQImage().copy(bounded_image_area));
+			GrayImage const rotated_gray(bounded_gray.transformed(QTransform().rotate(rotation)));
+			BinaryImage rotated_image(rotated_gray, data.bwThreshold());
 			if (m_ptrDbg.get()) {
 				m_ptrDbg->add(rotated_image, "bw_rotated");
 			}
@@ -162,7 +157,12 @@ Task::process(TaskStatus const& status, FilterData const& data)
 			Dpm const rotated_dpm(
 				data.xform().preRotation().rotate(unrotated_dpm)
 			);
-			cleanup(status, rotated_image, Dpi(rotated_dpm));
+			Dpi const dpi(rotated_dpm);
+			BinaryImage const text_regions(retainTextRegions(rotated_image, rotated_gray.toQImage(), dpi, status));
+			if (!text_regions.isNull()) {
+				rotated_image = text_regions;
+			}
+			cleanup(status, rotated_image, dpi);
 			if (m_ptrDbg.get()) {
 				m_ptrDbg->add(rotated_image, "after_cleanup");
 			}
@@ -173,7 +173,9 @@ Task::process(TaskStatus const& status, FilterData const& data)
 			skew_finder.setResolutionRatio(
 				(double)rotated_dpm.horizontal() / rotated_dpm.vertical()
 			);
-			Skew const skew(skew_finder.findPageSkew(rotated_image));
+			Skew const skew(text_regions.isNull()
+				? skew_finder.findPageSkew(rotated_image)
+				: skew_finder.findSkew(rotated_image));
 			
 			if (skew.confidence() >= skew.GOOD_CONFIDENCE) {
 				ui_data.setEffectiveDeskewAngle(-skew.angle());
