@@ -24,6 +24,8 @@
 #include "ReduceThreshold.h"
 #include "Constants.h"
 #include <QDebug>
+#include <algorithm>
+#include <vector>
 #include <stdexcept>
 #include <stdint.h>
 #include <math.h>
@@ -97,6 +99,13 @@ SkewFinder::setResolutionRatio(double const ratio)
 Skew
 SkewFinder::findSkew(BinaryImage const& image) const
 {
+	return findSkew(image, false);
+}
+
+
+Skew
+SkewFinder::findSkew(BinaryImage const& image, bool const center_weighted) const
+{
 	if (image.isNull()) {
 		throw std::invalid_argument("SkewFinder: null image was provided");
 	}
@@ -122,7 +131,7 @@ SkewFinder::findSkew(BinaryImage const& image) const
 	double best_coarse_score = 0.0;
 	double best_coarse_angle = -m_maxAngle;
 	for (double angle = -m_maxAngle; angle <= m_maxAngle; angle += coarse_step) {
-		double const score = process(coarse_reduced, skewed, angle);
+		double const score = process(coarse_reduced, skewed, angle, center_weighted);
 		sum_coarse_scores += score;
 		++num_coarse_scores;
 		if (score > best_coarse_score) {
@@ -151,17 +160,17 @@ SkewFinder::findSkew(BinaryImage const& image) const
 	// Fine binary search.
 	double angle_plus = best_coarse_angle + 0.5 * coarse_step;
 	double angle_minus = best_coarse_angle - 0.5 * coarse_step;
-	double score_plus = process(fine_reduced, skewed, angle_plus);
-	double score_minus = process(fine_reduced, skewed, angle_minus);
+	double score_plus = process(fine_reduced, skewed, angle_plus, center_weighted);
+	double score_minus = process(fine_reduced, skewed, angle_minus, center_weighted);
 	double const fine_score1 = score_plus;
 	double const fine_score2 = score_minus;
 	while (angle_plus - angle_minus > m_accuracy) {
 		if (score_plus > score_minus) {
 			angle_minus = 0.5 * (angle_plus + angle_minus);
-			score_minus = process(fine_reduced, skewed, angle_minus);
+			score_minus = process(fine_reduced, skewed, angle_minus, center_weighted);
 		} else if (score_plus < score_minus) {
 			angle_plus = 0.5 * (angle_plus + angle_minus);
-			score_plus = process(fine_reduced, skewed, angle_plus);
+			score_plus = process(fine_reduced, skewed, angle_plus, center_weighted);
 		} else {
 			// This protects us from unreasonably low m_accuracy.
 			break;
@@ -196,17 +205,25 @@ SkewFinder::findSkew(BinaryImage const& image) const
 	return Skew(-best_angle, confidence - 1.0);
 }
 
+Skew
+SkewFinder::findPageSkew(BinaryImage const& image) const
+{
+	return findSkew(image, true);
+}
+
+
 double
-SkewFinder::process(BinaryImage const& src, BinaryImage& dst, double const angle) const
+SkewFinder::process(BinaryImage const& src, BinaryImage& dst, double const angle,
+	bool const center_weighted) const
 {
 	double const tg = tan(angle * constants::DEG2RAD);
 	double const x_center = 0.5 * dst.width();
 	vShearFromTo(src, dst, tg / m_resolutionRatio, x_center, WHITE);
-	return calcScore(dst);
+	return calcScore(dst, center_weighted);
 }
 
 double
-SkewFinder::calcScore(BinaryImage const& image)
+SkewFinder::calcScore(BinaryImage const& image, bool const center_weighted)
 {
 	int const width = image.width();
 	int const height = image.height();
@@ -215,15 +232,32 @@ SkewFinder::calcScore(BinaryImage const& image)
 	int const last_word_idx = (width - 1) >> 5;
 	uint32_t const last_word_mask = ~uint32_t(0) << (31 - ((width - 1) & 31));
 	
+	// Give the center eight times the edge weight, with one intermediate step.
+	// Each packed word uses the weight at the midpoint of its valid pixels.
+	int const edge_weight = 2;
+	int const center_weight = 16;
+	int const weight_step = (center_weight - edge_weight) / 2;
+	std::vector<int> weights;
+	if (center_weighted) {
+		weights.reserve(last_word_idx + 1);
+		for (int i = 0; i <= last_word_idx; ++i) {
+			int const left = i * 32;
+			double const middle = left + 0.5 * std::min(32, width - left);
+			double const edge_distance = std::min(middle, width - middle) / width;
+			int const step = std::min(2, static_cast<int>(10 * edge_distance + 0.5));
+			weights.push_back(edge_weight + weight_step * step);
+		}
+	}
+
 	double score = 0.0;
 	int last_line_black_pixels = 0;
 	for (int y = 0; y < height; ++y, line += wpl) {
 		int num_black_pixels = 0;
 		int i = 0;
 		for (; i != last_word_idx; ++i) {
-			num_black_pixels += countNonZeroBits(line[i]);
+			num_black_pixels += countNonZeroBits(line[i]) * (center_weighted ? weights[i] : 1);
 		}
-		num_black_pixels += countNonZeroBits(line[i] & last_word_mask);
+		num_black_pixels += countNonZeroBits(line[i] & last_word_mask) * (center_weighted ? weights[i] : 1);
 		
 		if (y != 0) {
 			double const diff = num_black_pixels - last_line_black_pixels;
@@ -232,7 +266,7 @@ SkewFinder::calcScore(BinaryImage const& image)
 		last_line_black_pixels = num_black_pixels;
 	}
 	
-	return score;
+	return center_weighted ? score / (center_weight * center_weight) : score;
 }
 
 } // namespace imageproc

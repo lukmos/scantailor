@@ -173,7 +173,7 @@ Task::process(TaskStatus const& status, FilterData const& data)
 			skew_finder.setResolutionRatio(
 				(double)rotated_dpm.horizontal() / rotated_dpm.vertical()
 			);
-			Skew const skew(skew_finder.findSkew(rotated_image));
+			Skew const skew(skew_finder.findPageSkew(rotated_image));
 			
 			if (skew.confidence() >= skew.GOOD_CONFIDENCE) {
 				ui_data.setEffectiveDeskewAngle(-skew.angle());

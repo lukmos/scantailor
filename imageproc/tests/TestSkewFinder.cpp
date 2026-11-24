@@ -20,6 +20,8 @@
 #include "BinaryImage.h"
 #include <QApplication>
 #include <QImage>
+#include <QDir>
+#include <QFileInfo>
 #include <QPainter>
 #include <QTransform>
 #include <QColor>
@@ -70,7 +72,7 @@ BOOST_AUTO_TEST_CASE(test_positive_detection)
 	}
 	
 	SkewFinder skew_finder;
-	Skew const skew(skew_finder.findSkew(BinaryImage(image)));
+	Skew const skew(skew_finder.findPageSkew(BinaryImage(image)));
 	BOOST_REQUIRE(fabs(skew.angle() - 4.5) < 0.15);
 	BOOST_CHECK(skew.confidence() >= Skew::GOOD_CONFIDENCE);
 }
@@ -90,8 +92,25 @@ BOOST_AUTO_TEST_CASE(test_negative_detection)
 	SkewFinder skew_finder;
 	skew_finder.setCoarseReduction(0);
 	skew_finder.setFineReduction(0);
-	Skew const skew(skew_finder.findSkew(BinaryImage(image)));
+	Skew const skew(skew_finder.findPageSkew(BinaryImage(image)));
 	BOOST_CHECK(skew.confidence() < Skew::GOOD_CONFIDENCE);
+}
+
+BOOST_AUTO_TEST_CASE(test_center_weighted_skew_with_side_graphic)
+{
+	// Synthetic page with level body text and a tilted graphic in the left margin.
+	QDir const fixtures = QFileInfo(QString::fromLocal8Bit(__FILE__)).absoluteDir();
+	QImage const image(fixtures.filePath("deskew_side_graphic.png"));
+	BOOST_REQUIRE(!image.isNull());
+
+	BinaryImage const binary(image);
+	SkewFinder skew_finder;
+	Skew const whole(skew_finder.findSkew(binary));
+	BOOST_REQUIRE(fabs(whole.angle()) > 4.0);
+
+	Skew const page(skew_finder.findPageSkew(binary));
+	BOOST_CHECK_SMALL(page.angle(), 0.15);
+	BOOST_CHECK_GE(page.confidence(), Skew::GOOD_CONFIDENCE);
 }
 
 BOOST_AUTO_TEST_SUITE_END();

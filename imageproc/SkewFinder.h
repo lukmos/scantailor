@@ -138,12 +138,19 @@ public:
 	 * angles, one of those angles will be found, with a lower confidence.
 	 */
 	Skew findSkew(BinaryImage const& image) const;
+
+	/**
+	 * \brief Estimate page skew using a center-weighted horizontal projection.
+	 */
+	Skew findPageSkew(BinaryImage const& image) const;
 private:
 	static double const LOW_SCORE;
 	
-	double process(BinaryImage const& src, BinaryImage& dst, double angle) const;
+	Skew findSkew(BinaryImage const& image, bool center_weighted) const;
+	double process(BinaryImage const& src, BinaryImage& dst, double angle,
+		bool center_weighted) const;
 	
-	static double calcScore(BinaryImage const& image);
+	static double calcScore(BinaryImage const& image, bool center_weighted);
 	
 	double m_maxAngle;
 	double m_accuracy;
