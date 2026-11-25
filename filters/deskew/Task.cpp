@@ -18,6 +18,7 @@
 
 #include "Task.h"
 #include "TextRegionMask.h"
+#include "TableEdgeSkew.h"
 #include "Filter.h"
 #include "OptionsWidget.h"
 #include "Settings.h"
@@ -146,41 +147,47 @@ Task::process(TaskStatus const& status, FilterData const& data)
 		
 		if (bounded_image_area.isValid()) {
 			int const rotation = data.xform().preRotation().toDegrees();
-			QImage const bounded_gray(data.grayImage().toQImage().copy(bounded_image_area));
-			GrayImage const rotated_gray(bounded_gray.transformed(QTransform().rotate(rotation)));
-			BinaryImage rotated_image(rotated_gray, data.bwThreshold());
-			if (m_ptrDbg.get()) {
-				m_ptrDbg->add(rotated_image, "bw_rotated");
-			}
-			
 			QSize const unrotated_dpm(Dpm(data.origImage()).toSize());
 			Dpm const rotated_dpm(
 				data.xform().preRotation().rotate(unrotated_dpm)
 			);
 			Dpi const dpi(rotated_dpm);
-			BinaryImage const text_regions(retainTextRegions(rotated_image, rotated_gray.toQImage(), dpi, status));
-			if (!text_regions.isNull()) {
-				rotated_image = text_regions;
-			}
-			cleanup(status, rotated_image, dpi);
-			if (m_ptrDbg.get()) {
-				m_ptrDbg->add(rotated_image, "after_cleanup");
-			}
-			
-			status.throwIfCancelled();
-			
-			SkewFinder skew_finder;
-			skew_finder.setResolutionRatio(
-				(double)rotated_dpm.horizontal() / rotated_dpm.vertical()
-			);
-			Skew const skew(text_regions.isNull()
-				? skew_finder.findPageSkew(rotated_image)
-				: skew_finder.findSkew(rotated_image));
-			
-			if (skew.confidence() >= skew.GOOD_CONFIDENCE) {
-				ui_data.setEffectiveDeskewAngle(-skew.angle());
+			double const resolution_ratio = double(rotated_dpm.horizontal()) / rotated_dpm.vertical();
+			double table_correction = 0;
+			if (findTableEdgeCorrection(data.origImage(), bounded_image_area, rotation,
+					resolution_ratio, status, table_correction)) {
+				// The transform uses clockwise degrees, opposite to the UI.
+				ui_data.setEffectiveDeskewAngle(-table_correction);
 			} else {
-				ui_data.setEffectiveDeskewAngle(0);
+				QImage const bounded_gray(data.grayImage().toQImage().copy(bounded_image_area));
+				GrayImage const rotated_gray(bounded_gray.transformed(QTransform().rotate(rotation)));
+				BinaryImage rotated_image(rotated_gray, data.bwThreshold());
+				if (m_ptrDbg.get()) {
+					m_ptrDbg->add(rotated_image, "bw_rotated");
+				}
+
+				BinaryImage const text_regions(retainTextRegions(rotated_image, rotated_gray.toQImage(), dpi, status));
+				if (!text_regions.isNull()) {
+					rotated_image = text_regions;
+				}
+				cleanup(status, rotated_image, dpi);
+				if (m_ptrDbg.get()) {
+					m_ptrDbg->add(rotated_image, "after_cleanup");
+				}
+
+				status.throwIfCancelled();
+
+				SkewFinder skew_finder;
+				skew_finder.setResolutionRatio(resolution_ratio);
+				Skew const skew(text_regions.isNull()
+					? skew_finder.findPageSkew(rotated_image)
+					: skew_finder.findSkew(rotated_image));
+
+				if (skew.confidence() >= skew.GOOD_CONFIDENCE) {
+					ui_data.setEffectiveDeskewAngle(-skew.angle());
+				} else {
+					ui_data.setEffectiveDeskewAngle(0);
+				}
 			}
 			ui_data.setMode(MODE_AUTO);
 			

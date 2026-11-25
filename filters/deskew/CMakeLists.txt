@@ -17,6 +17,7 @@ SET(
 	Settings.cpp Settings.h
 	Task.cpp Task.h
 	TextRegionMask.cpp TextRegionMask.h TextRegionWeights.inc
+	TableEdgeSkew.cpp TableEdgeSkew.h
 	CacheDrivenTask.cpp CacheDrivenTask.h
 	Dependencies.cpp Dependencies.h
 	Params.cpp Params.h
